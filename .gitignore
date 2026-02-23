@@ -1,1 +1,39 @@
 /000
+# =========================
+# 1. Compilados de C
+# =========================
+# Ignoramos la librería compartida que creamos hoy
+*.so
+# Ignoramos archivos objeto y ejecutables de pruebas anteriores
+*.o
+*.out
+netsentinel
+netsentinel_core
+test_bin
+
+# =========================
+# 2. Python
+# =========================
+# Caché de ejecución
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Entornos virtuales (para cuando sumemos el backend asíncrono)
+venv/
+env/
+.venv/
+
+# Variables de entorno (¡Nunca subir credenciales de la base de datos!)
+.env
+
+# =========================
+# 3. Editor y Sistema Operativo
+# =========================
+# Configuraciones locales de VS Code
+.vscode/
+
+# Archivos temporales de Windows/Linux
+Thumbs.db
+.DS_Store
