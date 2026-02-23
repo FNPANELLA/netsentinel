@@ -6,6 +6,8 @@ class PacketInfo(ctypes.Structure):
     _fields_ = [
         ("source_ip", ctypes.c_char *16),
         ("dest_ip", ctypes.c_char *16),
+        ("src_port", ctypes.c_int),
+        ("dst_port", ctypes.c_int),
         ("protocol", ctypes.c_int),
         ("size", ctypes.c_int)
     ]
@@ -34,9 +36,11 @@ def start_engine():
                 src = packet.source_ip.decode('utf-8')
                 dst = packet.dest_ip.decode('utf-8')
                 size = packet.size
+                sport = packet.src_port
+                dport = packet.dst_port
                 
                 if src != "127.0.0.1" and dst != "127.0.0.1":
-                    print(f"[ALERTA] Trafico externo: {src} -> {dst} ({size} bytes)")
+                    print(f"[ALERTA] Trafico externo: {src}:{sport} -> {dst}:{dport} ({size} bytes)")
             
     except KeyboardInterrupt:
         print("deteniendo el motor...")
