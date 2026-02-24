@@ -9,7 +9,8 @@ class PacketInfo(ctypes.Structure):
         ("src_port", ctypes.c_int),
         ("dst_port", ctypes.c_int),
         ("protocol", ctypes.c_int),
-        ("size", ctypes.c_int)
+        ("size", ctypes.c_int),
+        ("is_alert", ctypes.c_int),
     ]
     
 lib_path = os.path.abspath("./libnetsentinel.so")
@@ -32,15 +33,19 @@ def start_engine():
         while True:    
             if lib.get_packet(ctypes.byref(packet)) == 0:
                 
-                # Decodificamos los bytes a strings de Python
+                # 
                 src = packet.source_ip.decode('utf-8')
                 dst = packet.dest_ip.decode('utf-8')
                 size = packet.size
                 sport = packet.src_port
                 dport = packet.dst_port
+                is_alert = packet.is_alert
+                
                 
                 if src != "127.0.0.1" and dst != "127.0.0.1":
-                    print(f"[ALERTA] Trafico externo: {src}:{sport} -> {dst}:{dport} ({size} bytes)")
+                    if is_alert == 1:
+                        print(f"[! PKT !]], rafaga de trafico detectada desde {src}:{sport}")
+                    print(f"[PKT] {src}:{sport} -> {dst}:{dport} ({size} bytes)")
             
     except KeyboardInterrupt:
         print("deteniendo el motor...")
