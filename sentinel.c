@@ -8,6 +8,8 @@
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <time.h>
+#include <linux/if_ether.h> 
+#include <netinet/udp.h>
 
 typedef struct {
     char ip[16];
@@ -34,7 +36,8 @@ typedef struct {
 int sock_raw = -1;
 
 int init_sniffer() {
-    sock_raw = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+    sock_raw = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_ALL));
+
     if (sock_raw < 0) return -1;
 
     memset(trackers, 0, sizeof(trackers));
@@ -93,6 +96,8 @@ int get_packet(PacketInfo *info) {
 
     struct iphdr *iph = (struct iphdr *)buffer;
 
+    if (iph->version != 4) return -1;
+
     struct in_addr src, dst;
     src.s_addr = iph->saddr;
     dst.s_addr = iph->daddr;
@@ -110,14 +115,19 @@ int get_packet(PacketInfo *info) {
 
         info->src_port = ntohs(tcph->source);
         info->dst_port = ntohs(tcph->dest);
-    } else {
-        info->src_port = 0;
-        info->dst_port = 0;
-
-        
-    }if (strcmp(info->source_ip, "127.0.0.1") != 0) {
+    } else if (iph->protocol == 17) {
+        struct udphdr *udph = (struct udphdr *)(buffer + iphdrlen);
+        info->src_port = ntohs(udph->source);
+        info->dst_port = ntohs(udph->dest);
+    }
+    else { 
+        info->src_port=0;
+        info->dst_port=0;
+    } 
+    if (strcmp(info->source_ip, "127.0.0.1") != 0) {
         info->is_alert = check_traffic_spike(info->source_ip);
-    } else {
+    } 
+    else {
         info->is_alert = 0;
     }
     return 0;

@@ -41,11 +41,20 @@ def start_engine():
                 dport = packet.dst_port
                 is_alert = packet.is_alert
                 
+                if packet.protocol == 1:
+                        proto_name = "ICMP"
+                elif packet.protocol == 6:
+                        proto_name = "TCP"
+                elif packet.protocol == 17:
+                        proto_name = "UDP"
+                else:
+                        proto_name = f"PROTO({packet.protocol})"                
+                
                 
                 if src != "127.0.0.1" and dst != "127.0.0.1":
                     if is_alert == 1:
-                        print(f"[! PKT !]], rafaga de trafico detectada desde {src}:{sport}")
-                    print(f"[PKT] {src}:{sport} -> {dst}:{dport} ({size} bytes)")
+                        print(f"[! {proto_name} !], multitud trafico detectado desde {src}:{sport}")
+                    print(f"[{proto_name}] {src}:{sport} -> {dst}:{dport} ({size} bytes)")
             
     except KeyboardInterrupt:
         print("deteniendo el motor...")
