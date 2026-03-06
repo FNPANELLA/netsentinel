@@ -41,6 +41,7 @@ def start_engine():
                 dport = packet.dst_port
                 is_alert = packet.is_alert
                 
+                proto_name = "Desconocido"
                 if packet.protocol == 1:
                         proto_name = "ICMP"
                 elif packet.protocol == 6:
