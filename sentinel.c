@@ -10,6 +10,8 @@
 #include <time.h>
 #include <linux/if_ether.h> 
 #include <netinet/udp.h>
+#include <pthread.h>
+
 
 typedef struct {
     char ip[16];
@@ -34,6 +36,7 @@ typedef struct {
 } PacketInfo;
 
 int sock_raw = -1;
+static pthread_mutex_t tracker_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int init_sniffer() {
     sock_raw = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_ALL));
@@ -125,7 +128,9 @@ int get_packet(PacketInfo *info) {
         info->dst_port=0;
     } 
     if (strcmp(info->source_ip, "127.0.0.1") != 0) {
+        pthread_mutex_lock(&tracker_mutex);
         info->is_alert = check_traffic_spike(info->source_ip);
+        pthread_mutex_unlock(&tracker_mutex);
     } 
     else {
         info->is_alert = 0;
