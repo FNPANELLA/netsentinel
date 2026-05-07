@@ -5,6 +5,7 @@ import uvicorn
 from collections import deque
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
+import asyncpg
 
 # --- ctype config ---
 lib = ctypes.CDLL('./libnetsentinel.so')
@@ -94,16 +95,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# --- async buffer drain ---
-async def broadcast_loop():
-    while True:
-        try:
-            packet = packet_buffer.popleft()  #no race condition now heh
-            if manager.active_connections:
-                await manager.broadcast(packet)
-        except IndexError:
-            # buffer vacío, esperamos un poco
-            await asyncio.sleep(0.01)
+
 
 # --- 5. SERVIDOR FASTAPI ---
 html_dashboard = """
@@ -147,9 +139,7 @@ html_dashboard = """
 
 app = FastAPI(title="NetSentinel API")
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(broadcast_loop())
+
 
 @app.get("/")
 async def root():
@@ -160,13 +150,75 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # mantenemos el WebSocket vivo esperando mensajes del cliente
+            # ..
+
             await websocket.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(websocket)
 
-# --- 6. ARRANQUE ---
+
+#postgresql
+
+DB_URL = "postgresql://sentinel:sentinel@localhost:5432/netsentinel"
+db_pool = None
+
+async def save_event(data: dict):
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO events (src_ip, dst_ip, src_port, dst_port, protocol, size, is_alert)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+        """,
+            data["src"], data["dst"],
+            data["sport"], data["dport"],
+            data["protocol"], data["size"],
+            bool(data["alert"])
+        )
+
+async def broadcast_loop():
+    while True:
+        try:
+            packet = packet_buffer.popleft()
+            await save_event(packet)
+            if manager.active_connections:
+                await manager.broadcast(packet)
+        except IndexError:
+            await asyncio.sleep(0.01)
+
+@app.on_event("startup")
+async def startup_event():
+    global db_pool
+    db_pool = await asyncpg.create_pool(DB_URL)
+    asyncio.create_task(broadcast_loop())
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# arranque ---
 if __name__ == "__main__":
     hilo = threading.Thread(target=recolector_de_paquetes, daemon=True)
     hilo.start()
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
