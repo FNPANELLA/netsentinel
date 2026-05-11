@@ -1,0 +1,30 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body { background: #0d1117; color: #e6edf3; font-family: monospace; }
+
+.dashboard { padding: 1.5rem; max-width: 1400px; margin: 0 auto; }
+
+h1 { color: #00ff88; margin-bottom: 1rem; font-size: 1.5rem; }
+h2 { color: #58a6ff; margin-bottom: 0.75rem; font-size: 1rem; }
+
+.stats-bar { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
+
+.stat { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 1rem 1.5rem; flex: 1; text-align: center; }
+
+.stat-label { display: block; font-size: 0.75rem; color: #8b949e; margin-bottom: 0.25rem; }
+.stat-value { font-size: 1.75rem; font-weight: bold; }
+.stat-value.tcp { color: #00ff00; }
+.stat-value.udp { color: #00aaff; }
+.stat-value.icmp { color: #ffaa00; }
+.stat-value.alert { color: #ff4444; }
+
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+
+.chart-card, .table-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 1rem; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th { color: #8b949e; text-align: left; padding: 0.5rem; border-bottom: 1px solid #30363d; }
+td { padding: 0.5rem; border-bottom: 1px solid #21262d; }
+.alert-row td { color: #ff4444; }
+
+.no-alerts { color: #8b949e; font-size: 0.85rem; }
