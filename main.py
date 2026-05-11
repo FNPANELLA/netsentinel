@@ -97,7 +97,7 @@ manager = ConnectionManager()
 
 
 
-# --- 5. SERVIDOR FASTAPI ---
+# ---. server FASTAPI ---
 html_dashboard = """
 <!DOCTYPE html>
 <html>

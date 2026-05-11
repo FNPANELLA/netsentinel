@@ -2,9 +2,9 @@
 # =========================
 # 1. Compilados de C
 # =========================
-# Ignoramos la librería compartida que creamos hoy
+
 *.so
-# Ignoramos archivos objeto y ejecutables de pruebas anteriores
+
 *.o
 *.out
 netsentinel
@@ -20,12 +20,10 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Entornos virtuales (para cuando sumemos el backend asíncrono)
 venv/
 env/
 .venv/
 
-# Variables de entorno (¡Nunca subir credenciales de la base de datos!)
 .env
 
 # =========================
@@ -37,3 +35,5 @@ env/
 # Archivos temporales de Windows/Linux
 Thumbs.db
 .DS_Store
+
+.png
