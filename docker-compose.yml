@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: sentinel
+      POSTGRES_DB: netsentinel
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  backend:
+    build: .
+    command: ./venv/bin/python3 main.py
+    depends_on:
+      - postgres
+    ports:
+      - "8000:8000"
+    network_mode: host
+    privileged: true  # necesario para raw sockets
+
+  frontend:
+    build: ./netsentinel-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
