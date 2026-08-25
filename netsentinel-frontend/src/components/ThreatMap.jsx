@@ -1,47 +1,94 @@
-import { useEffect, useState } from "react"
-import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet"
-import "leaflet/dist/leaflet.css"
+import { useState, useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Tooltip } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 
-async function geolocate(ip) {
-  try {
-    const res = await fetch(`http://ip-api.com/json/${ip}?fields=lat,lon,country,city`)
-    return await res.json()
-  } catch {
-    return null
-  }
-}
-
-export default function ThreatMap({ alerts }) {
-  const [markers, setMarkers] = useState([])
+export default function ThreatMap({ alerts = [] }) {
+  const [markers, setMarkers] = useState([]);
+  // El caché en memoria: clave IP, valor [Latitud, Longitud]
+  const ipCache = useRef({}); 
 
   useEffect(() => {
-    if (alerts.length === 0) return
-    const latest = alerts[0]
-    geolocate(latest.src).then(geo => {
-      if (geo && geo.lat) {
-        setMarkers(prev => {
-          const exists = prev.find(m => m.ip === latest.src)
-          if (exists) return prev
-          return [...prev.slice(-50), { ip: latest.src, lat: geo.lat, lon: geo.lon, country: geo.country, city: geo.city }]
-        })
+    const fetchGeoData = async () => {
+      const safeAlerts = Array.isArray(alerts) ? alerts : [];
+      const newMarkers = [];
+
+      for (const alert of safeAlerts) {
+        const ip = alert.source_ip;
+        if (!ip) continue;
+
+        // 1. Si la IP ya está en caché, la graficamos al instante sin llamar a la API
+        if (ipCache.current[ip]) {
+          newMarkers.push({ ...alert, coords: ipCache.current[ip] });
+          continue;
+        }
+
+        // 2. Si es tráfico local (Docker, Loopback, LAN), le asignamos una coordenada fija de prueba
+        // (Seteado en Buenos Aires para la telemetría de prueba local)
+        if (ip.startsWith("127.") || ip.startsWith("192.168.") || ip.startsWith("172.") || ip.startsWith("10.")) {
+          ipCache.current[ip] = [-34.6037, -58.3816];
+          newMarkers.push({ ...alert, coords: ipCache.current[ip] });
+          continue;
+        }
+
+        // 3. Si es una IP pública nueva, la buscamos en ip-api.com
+        try {
+          const res = await fetch(`http://ip-api.com/json/${ip}`);
+          const data = await res.json();
+          if (data.status === "success") {
+            ipCache.current[ip] = [data.lat, data.lon];
+            newMarkers.push({ ...alert, coords: ipCache.current[ip] });
+          }
+        } catch (err) {
+          console.error(`Error geolocalizando la IP ${ip}:`, err);
+        }
       }
-    })
-  }, [alerts])
+      
+      setMarkers(newMarkers);
+    };
+
+    // Solo procesamos si realmente hay alertas
+    if (alerts && alerts.length > 0) {
+      fetchGeoData();
+    }
+  }, [alerts]);
 
   return (
-    <div className="chart-card">
-      <h2>Mapa de amenazas</h2>
-      <MapContainer center={[20, 0]} zoom={2} style={{ height: "200px", width: "100%" }}>
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution="© OpenStreetMap"
-        />
-        {markers.map((m, i) => (
-          <CircleMarker key={i} center={[m.lat, m.lon]} radius={8} color="#ff0000">
-            <Popup>{m.ip}<br />{m.city}, {m.country}</Popup>
-          </CircleMarker>
-        ))}
-      </MapContainer>
+    <div className="map-card" style={{ display: "flex", flexDirection: "column" }}>
+      <h2 style={{ marginBottom: "10px" }}>Mapa de amenazas</h2>
+      {/* El contenedor debe tener un alto fijo para que Leaflet sepa cómo renderizar */}
+      <div style={{ flexGrow: 1, minHeight: "300px", borderRadius: "8px", overflow: "hidden" }}>
+        <MapContainer 
+          center={[20, 0]} 
+          zoom={2} 
+          style={{ height: "100%", width: "100%", zIndex: 1 }} 
+          scrollWheelZoom={false}
+        >
+          {/* Basemap oscuro para que resalten las alertas */}
+          <TileLayer
+            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            attribution='&copy; OpenStreetMap &copy; CARTO'
+          />
+          {markers.map((marker, idx) => (
+            <CircleMarker 
+              key={idx} 
+              center={marker.coords} 
+              radius={8}
+              fillColor="#ff4d4d"
+              color="#ff0000"
+              weight={1}
+              opacity={0.8}
+              fillOpacity={0.6}
+            >
+              <Tooltip>
+                <strong>IP Origen:</strong> {marker.source_ip} <br/>
+                <strong>Protocolo:</strong> {marker.protocol} <br/>
+                <strong>Puerto:</strong> {marker.src_port} <br/>
+                <strong>Tamaño:</strong> {marker.size}B
+              </Tooltip>
+            </CircleMarker>
+          ))}
+        </MapContainer>
+      </div>
     </div>
-  )
+  );
 }

@@ -1,36 +1,46 @@
-export default function AlertsTable({ alerts }) {
-  if (alerts.length === 0) return (
-    <div className="table-card">
-      <h2>Alertas</h2>
-      <p className="no-alerts">Sin alertas detectadas</p>
-    </div>
-  )
+export default function AlertsTable({ alerts = [] }) {
+  // Aseguramos que alerts sea un array para evitar crasheos del DOM
+  const safeAlerts = Array.isArray(alerts) ? alerts : [];
 
   return (
-    <div className="table-card">
-      <h2>Alertas ({alerts.length})</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Protocolo</th>
-            <th>Origen</th>
-            <th>Puerto</th>
-            <th>Destino</th>
-            <th>Tamaño</th>
-          </tr>
-        </thead>
-        <tbody>
-          {alerts.map((a, i) => (
-            <tr key={i} className="alert-row">
-              <td>{a.protocol}</td>
-              <td>{a.src}</td>
-              <td>{a.sport}</td>
-              <td>{a.dst}</td>
-              <td>{a.size}B</td>
+    <div className="alerts-card">
+      <h2>Alertas ({safeAlerts.length})</h2>
+      
+      <div className="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Protocolo</th>
+              <th>Origen</th>
+              <th>Puerto Origen</th>
+              <th>Destino</th>
+              <th>Puerto Destino</th>
+              <th>Tamaño</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {safeAlerts.length === 0 ? (
+              <tr>
+                <td colSpan="6" style={{ textAlign: "center", color: "#888", padding: "20px" }}>
+                  Sin alertas detectadas
+                </td>
+              </tr>
+            ) : (
+              safeAlerts.map((alert, index) => (
+                <tr key={index} style={{ color: "#ff4d4d" }}>
+                  {/* Mapeamos EXACTAMENTE las claves que manda FastAPI */}
+                  <td>{alert.protocol}</td>
+                  <td>{alert.source_ip}</td>
+                  <td>{alert.src_port}</td>
+                  <td>{alert.dest_ip}</td>
+                  <td>{alert.dst_port}</td>
+                  <td>{alert.size}B</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

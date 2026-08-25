@@ -1,15 +1,12 @@
-import ctypes
-import threading
 import asyncio
-import uvicorn
-from collections import deque
+import ctypes
+import json
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 import asyncpg
 
-# --- ctype config ---
-lib = ctypes.CDLL('./libnetsentinel.so')
-
+# --- ESTRUCTURA CTYPES ---
 class PacketInfo(ctypes.Structure):
     _fields_ = [
         ("source_ip", ctypes.c_char * 16),
@@ -18,207 +15,156 @@ class PacketInfo(ctypes.Structure):
         ("dst_port", ctypes.c_int),
         ("protocol", ctypes.c_int),
         ("size", ctypes.c_int),
-        ("is_alert", ctypes.c_int)
+        ("is_alert", ctypes.c_int),
     ]
 
-lib.init_sniffer.restype = ctypes.c_int
-lib.get_packet.argtypes = [ctypes.POINTER(PacketInfo)]
-lib.get_packet.restype = ctypes.c_int
+# Carga de la librería nativa
+try:
+    sentinel_lib = ctypes.CDLL('./libnetsentinel.so')
+    sentinel_lib.init_sniffer.restype = ctypes.c_int
+    sentinel_lib.get_packet.argtypes = [ctypes.POINTER(PacketInfo)]
+    sentinel_lib.get_packet.restype = ctypes.c_int
+    
+    if sentinel_lib.init_sniffer() < 0:
+        print("ERROR: No se pudo inicializar el socket crudo. ¿Lo corriste con sudo?")
+except Exception as e:
+    print(f"Error cargando libnetsentinel.so: {e}")
 
-# --- . BUFFER ---
-packet_buffer = deque(maxlen=1000)
+# --- BASE DE DATOS Y ESTADO ---
+DB_DSN = "postgres://sentinel:tu_contraseña_aqui@localhost:5432/netsentinel" # Ajustá las credenciales si difieren
+pool = None
 
-def recolector_de_paquetes():
-    if lib.init_sniffer() < 0:
-        print("Error: No se pudo inicializar el sniffer")
-        return
-
-    packet = PacketInfo()
-    print("Recolección en segundo plano iniciada...")
-
-    while True:
-        try:
-            result = lib.get_packet(ctypes.byref(packet))
-            if result == 0:
-                src = packet.source_ip.decode('utf-8')
-                dst = packet.dest_ip.decode('utf-8')
-
-                if src != "127.0.0.1" and dst != "127.0.0.1":
-                    proto_name = "DESCONOCIDO"
-                    if packet.protocol == 1: proto_name = "ICMP"
-                    elif packet.protocol == 6: proto_name = "TCP"
-                    elif packet.protocol == 17: proto_name = "UDP"
-
-                    data = {
-                        "src": src, "sport": packet.src_port,
-                        "dst": dst, "dport": packet.dst_port,
-                        "protocol": proto_name, "size": packet.size,
-                        "alert": packet.is_alert
-                    }
-                    packet_buffer.append(data)
-        except Exception as e:
-            print(f"ERROR en recolector: {e}")
-
-# --- . BROADCASTER (new) ---
+# --- GESTOR DE WEBSOCKETS ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
-        self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        async with self._lock:
-            self.active_connections.append(websocket)
-        print(f"Cliente conectado. Total: {len(self.active_connections)}")
+        self.active_connections.append(websocket)
 
-    async def disconnect(self, websocket: WebSocket):
-        async with self._lock:
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-        print(f"Cliente desconectado. Total: {len(self.active_connections)}")
 
-    async def broadcast(self, data: dict):
-        async with self._lock:
-            targets = list(self.active_connections)  # copia para no iterar mientras se modifica
-
-        dead = []
-        for ws in targets:
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
             try:
-                await ws.send_json(data)
+                await connection.send_text(message)
             except Exception:
-                dead.append(ws)  # conexión rota, la marcamos para sacar
-
-        # limpiar conexiones muertas
-        if dead:
-            async with self._lock:
-                for ws in dead:
-                    self.active_connections.remove(ws)
+                pass
 
 manager = ConnectionManager()
 
+# --- FUNCIONES DE BASE DE DATOS ---
+async def save_event_batch(batch: list):
+    """Guarda un lote entero de paquetes en PostgreSQL de una sola vez."""
+    if not pool or not batch:
+        return
+    
+    query = """
+        INSERT INTO events (src_ip, dst_ip, src_port, dst_port, protocol, size, is_alert)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+    """
+    
+    # Preparamos los datos como una lista de tuplas para executemany
+    datos = [
+        (
+            p['source_ip'], p['dest_ip'], p['src_port'], p['dst_port'],
+            p['protocol'], p['size'], p['is_alert']
+        ) for p in batch
+    ]
+    
+    try:
+        async with pool.acquire() as conn:
+            await conn.executemany(query, datos)
+    except Exception as e:
+        print(f"Error en Bulk Insert: {e}")
 
+# --- BUCLE PRINCIPAL DE CAPTURA (BATCHING) ---
+def get_protocol_name(proto_num):
+    mapping = {6: "TCP", 17: "UDP", 1: "ICMP"}
+    return mapping.get(proto_num, str(proto_num))
 
-# ---. server FASTAPI ---
-html_dashboard = """
-<!DOCTYPE html>
-<html>
-    <head>
-        <title>NetSentinel Live</title>
-        <style>
-            body { background-color: #1e1e1e; color: #00ff00; font-family: monospace; }
-            .alert { color: #ff0000; font-weight: bold; }
-        </style>
-    </head>
-    <body>
-        <h2>NetSentinel Live Traffic</h2>
-        <ul id="traffic"></ul>
-        <script>
-            // Bug #4 corregido: URL dinámica en lugar de localhost hardcodeado
-            var ws = new WebSocket("ws://" + window.location.host + "/ws");
-            ws.onmessage = function(event) {
-                var list = document.getElementById('traffic');
-                var packet = JSON.parse(event.data);
-                var li = document.createElement('li');
-
-                var text = `[${packet.protocol}] ${packet.src}:${packet.sport} -> ${packet.dst}:${packet.dport} (${packet.size} bytes)`;
-                if (packet.alert === 1) {
-                    li.className = "alert";
-                    text = "⚠ ALERTA DDoS: " + text;
+async def broadcast_loop():
+    print("Iniciando motor de captura en segundo plano...")
+    info = PacketInfo()
+    
+    while True:
+        batch = []
+        loop = asyncio.get_event_loop()
+        start_time = loop.time()
+        
+        
+        while loop.time() - start_time < 0.5:
+            result = sentinel_lib.get_packet(ctypes.byref(info))
+            
+            if result == 0:
+                packet_dict = {
+                    "source_ip": info.source_ip.decode('utf-8'),
+                    "dest_ip": info.dest_ip.decode('utf-8'),
+                    "src_port": info.src_port,
+                    "dst_port": info.dst_port,
+                    "protocol": get_protocol_name(info.protocol),
+                    "size": info.size,
+                    "is_alert": bool(info.is_alert)
                 }
+                batch.append(packet_dict)
+            else:
+                
+                await asyncio.sleep(0.005) 
+                
+        
+        if batch:
+            #
+            await manager.broadcast(json.dumps(batch))
+            
 
-                li.textContent = text;
-                list.prepend(li);
+            alert_batch = [p for p in batch if p['is_alert']]
+            await save_event_batch(batch)
 
-                if (list.childNodes.length > 20) {
-                    list.removeChild(list.lastChild);
-                }
-            };
-        </script>
-    </body>
-</html>
-"""
+# --- CICLO DE VIDA DE FASTAPI ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # STARTUP
+    global pool
+    try:
+        pool = await asyncpg.create_pool(DB_DSN)
+        print("Conectado a PostgreSQL.")
+    except Exception as e:
+        print(f"Error conectando a Postgres: {e}")
+        
+    asyncio.create_task(broadcast_loop())
+    
+    yield
+    
+    # SHUTDOWN
+    if pool:
+        await pool.close()
+        print("Conexión a PostgreSQL cerrada.")
 
-app = FastAPI(title="NetSentinel API")
+# --- INICIALIZACIÓN DE LA APP ---
+app = FastAPI(lifespan=lifespan)
 
-
-
-@app.get("/")
-async def root():
-    return HTMLResponse(html_dashboard)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # ..
-
+            # Mantenemos viva la conexión
             await websocket.receive_text()
     except WebSocketDisconnect:
-        await manager.disconnect(websocket)
+        manager.disconnect(websocket)
 
-
-#postgresql
-
-DB_URL = "postgresql://sentinel:sentinel@localhost:5432/netsentinel"
-db_pool = None
-
-async def save_event(data: dict):
-    async with db_pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO events (src_ip, dst_ip, src_port, dst_port, protocol, size, is_alert)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-        """,
-            data["src"], data["dst"],
-            data["sport"], data["dport"],
-            data["protocol"], data["size"],
-            bool(data["alert"])
-        )
-
-async def broadcast_loop():
-    while True:
-        try:
-            packet = packet_buffer.popleft()
-            await save_event(packet)
-            if manager.active_connections:
-                await manager.broadcast(packet)
-        except IndexError:
-            await asyncio.sleep(0.01)
-
-@app.on_event("startup")
-async def startup_event():
-    global db_pool
-    db_pool = await asyncpg.create_pool(DB_URL)
-    asyncio.create_task(broadcast_loop())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# arranque ---
 if __name__ == "__main__":
-    hilo = threading.Thread(target=recolector_de_paquetes, daemon=True)
-    hilo.start()
+    import uvicorn
+    # Importante correrlo en host 0.0.0.0
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
